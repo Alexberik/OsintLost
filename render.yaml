@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: osintlost
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 8090
+      - key: LOST_MAX_UPLOAD_MB
+        value: 15
