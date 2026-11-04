@@ -1,243 +1,33 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lost - OSINT People Search by Photo</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg: #070b14; --bg-card: #0d1525; --bg-elevated: #121c2e; --border: #1e2d45;
-      --cyan: #00e5ff; --cyan-dim: #00b8d4; --orange: #ff6b35; --text: #e8f0fe;
-      --text-muted: #8b9bb4; --success: #00c853; --danger: #ff3d71;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text);
-      min-height: 100vh; line-height: 1.5;
-      background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0,229,255,0.08), transparent);
-    }
-    .container { max-width: 1100px; margin: 0 auto; padding: 32px 20px 80px; }
-    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; flex-wrap: wrap; gap: 16px; }
-    .logo { display: flex; align-items: center; gap: 14px; }
-    .logo-mark {
-      width: 42px; height: 42px; background: linear-gradient(135deg, var(--cyan), #0091ea);
-      border-radius: 10px; display: grid; place-items: center; font-weight: 700; font-size: 18px; color: #000;
-      box-shadow: 0 0 24px rgba(0,229,255,0.35);
-    }
-    .logo h1 { font-size: 24px; font-weight: 700; }
-    .logo span { font-size: 13px; color: var(--text-muted); }
-    .badge { font-size: 11px; padding: 4px 10px; border-radius: 20px; background: rgba(0,229,255,0.12); color: var(--cyan); border: 1px solid rgba(0,229,255,0.25); }
-    .upload-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 28px; }
-    .dropzone {
-      border: 2px dashed var(--border); border-radius: 12px; padding: 48px 24px; text-align: center;
-      cursor: pointer; background: var(--bg-elevated); position: relative; transition: all 0.2s;
-    }
-    .dropzone:hover, .dropzone.dragover { border-color: var(--cyan); background: rgba(0,229,255,0.04); }
-    .dropzone h3 { font-size: 18px; margin: 12px 0 6px; }
-    .dropzone p { color: var(--text-muted); font-size: 14px; }
-    .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .preview-wrap { display: none; margin-top: 24px; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-    .preview-wrap.active { display: flex; }
-    .preview-img { max-width: 220px; max-height: 280px; border-radius: 10px; border: 1px solid var(--border); object-fit: cover; }
-    .meta-form { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 14px; }
-    label { font-size: 12px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; }
-    input[type="text"] {
-      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-      padding: 11px 14px; color: var(--text); font-size: 14px; font-family: inherit;
-    }
-    input:focus { outline: none; border-color: var(--cyan); }
-    .btn {
-      display: inline-flex; align-items: center; justify-content: center; padding: 12px 22px;
-      border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; border: none; font-family: inherit;
-    }
-    .btn-primary { background: linear-gradient(135deg, var(--cyan), var(--cyan-dim)); color: #001018; }
-    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-    .results { display: none; }
-    .results.active { display: block; }
-    .section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
-    .section h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
-    .section h2::before { content: ""; width: 4px; height: 16px; background: var(--cyan); border-radius: 2px; }
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
-    .info-item { background: var(--bg-elevated); border-radius: 8px; padding: 12px 14px; }
-    .info-item .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
-    .info-item .value { font-size: 14px; font-family: 'JetBrains Mono', monospace; word-break: break-all; }
-    .links-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-    .link-card {
-      display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--bg-elevated);
-      border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: var(--text);
-      font-size: 13px; font-weight: 500; transition: all 0.15s;
-    }
-    .link-card:hover { border-color: var(--cyan); color: var(--cyan); }
-    .link-card .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); flex-shrink: 0; }
-    .notes { list-style: none; }
-    .notes li { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text-muted); display: flex; gap: 10px; }
-    .notes li:last-child { border-bottom: none; }
-    .notes li::before { content: "->"; color: var(--cyan); font-weight: 600; }
-    .status-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-    .pill { font-size: 12px; padding: 5px 12px; border-radius: 20px; font-weight: 500; }
-    .pill-ok { background: rgba(0,200,83,0.15); color: var(--success); border: 1px solid rgba(0,200,83,0.3); }
-    .pill-warn { background: rgba(255,107,53,0.15); color: var(--orange); border: 1px solid rgba(255,107,53,0.3); }
-    .loader { display: none; text-align: center; padding: 40px; }
-    .loader.active { display: block; }
-    .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 16px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    footer { margin-top: 48px; text-align: center; color: var(--text-muted); font-size: 12px; }
-    footer a { color: var(--cyan); text-decoration: none; }
-    .disclaimer { margin-top: 24px; padding: 14px 18px; background: rgba(255,61,113,0.08); border: 1px solid rgba(255,61,113,0.2); border-radius: 10px; font-size: 13px; color: var(--text-muted); }
-    .face-score { font-size: 13px; color: var(--cyan); font-family: 'JetBrains Mono', monospace; margin: 4px 0; }
-    .candidates { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-    .chip { font-size: 12px; padding: 5px 12px; border-radius: 16px; background: rgba(0,229,255,0.1); color: var(--cyan); border: 1px solid rgba(0,229,255,0.25); font-family: 'JetBrains Mono', monospace; }
-    .ann-img { max-width: 100%; max-height: 360px; border-radius: 10px; border: 1px solid var(--border); margin-top: 12px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <header>
-      <div class="logo">
-        <div class="logo-mark">L</div>
-        <div><h1>Lost</h1><span>OSINT People Search by Photo · v0.2</span></div>
-      </div>
-      <div class="badge">Local Face + Social Discovery</div>
-    </header>
-
-    <div class="upload-card">
-      <div class="dropzone" id="dropzone">
-        <h3>Загрузите фото человека</h3>
-        <p>JPG, PNG, WEBP · до 15 МБ · лицо должно быть хорошо видно</p>
-        <input type="file" id="fileInput" accept="image/*" />
-      </div>
-      <div class="preview-wrap" id="previewWrap">
-        <img id="previewImg" class="preview-img" alt="preview" />
-        <div class="meta-form">
-          <div><label>Имя / ФИО</label><input type="text" id="nameInput" placeholder="Иван Иванов" /></div>
-          <div><label>Username / ник</label><input type="text" id="usernameInput" placeholder="@username" /></div>
-          <div><label>Доп. информация</label><input type="text" id="extraInput" placeholder="город, работа..." /></div>
-          <button class="btn btn-primary" id="analyzeBtn" disabled>Запустить анализ</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="loader" id="loader"><div class="spinner"></div><p>Детекция лиц + подготовка поиска в соцсетях...</p></div>
-
-    <div class="results" id="results">
-      <div class="status-bar" id="statusBar"></div>
-      <div class="section" id="facesSection" style="display:none;">
-        <h2>Локальная детекция лиц (UltraFace)</h2>
-        <div id="facesInfo"></div>
-        <img id="annotatedImg" class="ann-img" style="display:none;" alt="annotated" />
-      </div>
-      <div class="section"><h2>Метаданные EXIF</h2><div class="grid-2" id="exifGrid"></div></div>
-      <div class="section">
-        <h2>Reverse Image & Face Search</h2>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:14px;">Лучшие для лиц: Yandex, PimEyes, FaceCheck.ID, Search4Faces</p>
-        <div class="links-grid" id="reverseLinks"></div>
-      </div>
-      <div class="section" id="socialSection" style="display:none;">
-        <h2>Поиск в соцсетях</h2>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:10px;">Username-кандидаты:</p>
-        <div class="candidates" id="candidates"></div>
-        <p style="color:var(--text-muted);font-size:13px;margin:14px 0 10px;">Инструменты:</p>
-        <div class="links-grid" id="toolLinks"></div>
-        <p style="color:var(--text-muted);font-size:13px;margin:18px 0 10px;">Прямые ссылки на профили:</p>
-        <div class="links-grid" id="socialLinks"></div>
-      </div>
-      <div class="section"><h2>Рекомендации</h2><ul class="notes" id="notesList"></ul></div>
-      <div class="disclaimer"><strong>Важно:</strong> Используйте только публичные данные и этично.</div>
-    </div>
-    <footer>Lost v0.2 · UltraFace + username generation · Sherlock / Maigret</footer>
-  </div>
-  <script>
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('fileInput');
-    const previewWrap = document.getElementById('previewWrap');
-    const previewImg = document.getElementById('previewImg');
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    const loader = document.getElementById('loader');
-    const results = document.getElementById('results');
-    let selectedFile = null;
-
-    ['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('dragover'); }));
-    ['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
-    dropzone.addEventListener('drop', e => { if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
-    fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
-
-    function handleFile(file) {
-      if (!file.type.startsWith('image/')) return alert('Нужно изображение');
-      selectedFile = file;
-      previewImg.src = URL.createObjectURL(file);
-      previewWrap.classList.add('active');
-      analyzeBtn.disabled = false;
-      results.classList.remove('active');
-    }
-
-    analyzeBtn.addEventListener('click', async () => {
-      if (!selectedFile) return;
-      analyzeBtn.disabled = true; loader.classList.add('active'); results.classList.remove('active');
-      const form = new FormData();
-      form.append('file', selectedFile);
-      form.append('name', document.getElementById('nameInput').value || '');
-      form.append('username', document.getElementById('usernameInput').value || '');
-      form.append('extra', document.getElementById('extraInput').value || '');
-      try {
-        const res = await fetch('/api/analyze', { method: 'POST', body: form });
-        if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.error || 'Ошибка'); }
-        renderResults(await res.json());
-      } catch (err) { alert('Ошибка: ' + err.message); }
-      finally { loader.classList.remove('active'); analyzeBtn.disabled = false; }
-    });
-
-    function renderResults(data) {
-      const faceCount = (data.faces && data.faces.count) || 0;
-      document.getElementById('statusBar').innerHTML = `
-        <span class="pill pill-ok">Job ${data.job_id}</span>
-        <span class="pill ${faceCount > 0 ? 'pill-ok' : 'pill-warn'}">${faceCount > 0 ? faceCount + ' лиц(о)' : 'Лица не найдены'}</span>
-        <span class="pill pill-ok">Hash ${data.file_hash}</span>
-        ${data.gps ? '<span class="pill pill-ok">GPS</span>' : '<span class="pill pill-warn">Нет GPS</span>'}`;
-
-      const facesSection = document.getElementById('facesSection');
-      if (faceCount > 0) {
-        facesSection.style.display = 'block';
-        document.getElementById('facesInfo').innerHTML = (data.faces.faces || []).map((f,i) =>
-          `<div class="face-score">#${i+1} · score ${f.score} · ${f.width}x${f.height}px</div>`).join('');
-        const ann = document.getElementById('annotatedImg');
-        if (data.annotated_url) { ann.src = data.annotated_url; ann.style.display = 'block'; }
-        else ann.style.display = 'none';
-      } else facesSection.style.display = 'none';
-
-      const items = [
-        ['Размер', `${data.exif.width||'?'} × ${data.exif.height||'?'} px`],
-        ['Формат', data.exif.format || '—'], ['Камера', data.exif.camera || '—'],
-        ['Дата', data.exif.datetime || '—'], ['ПО', data.exif.software || '—'],
-        ['GPS', data.gps ? `${data.gps.lat}, ${data.gps.lon}` : 'нет']
-      ];
-      if (data.gps) items.push(['Карта', `<a href="https://www.google.com/maps?q=${data.gps.lat},${data.gps.lon}" target="_blank" style="color:var(--cyan)">Google Maps</a>`]);
-      document.getElementById('exifGrid').innerHTML = items.map(([l,v]) =>
-        `<div class="info-item"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
-
-      document.getElementById('reverseLinks').innerHTML = Object.entries(data.reverse_links||{}).map(([n,u]) =>
-        `<a class="link-card" href="${u}" target="_blank" rel="noopener"><span class="dot"></span>${n}</a>`).join('');
-
-      const candidates = data.username_candidates || [];
-      const socialSection = document.getElementById('socialSection');
-      if (candidates.length) {
-        socialSection.style.display = 'block';
-        document.getElementById('candidates').innerHTML = candidates.map(c => `<span class="chip">${c}</span>`).join('');
-        document.getElementById('toolLinks').innerHTML = Object.entries(data.username_tools||{}).map(([n,u]) => {
-          const isLink = String(u).startsWith('http');
-          return isLink ? `<a class="link-card" href="${u}" target="_blank"><span class="dot"></span>${n}</a>`
-            : `<div class="link-card" style="cursor:default"><span class="dot"></span><div>${n}<br><small style="color:var(--text-muted);font-size:11px">${u}</small></div></div>`;
-        }).join('');
-        document.getElementById('socialLinks').innerHTML = Object.entries(data.social_links||{}).slice(0,24).map(([n,u]) =>
-          `<a class="link-card" href="${u}" target="_blank"><span class="dot"></span>${n}</a>`).join('');
-      } else socialSection.style.display = 'none';
-
-      document.getElementById('notesList').innerHTML = (data.notes||[]).map(n => `<li>${n}</li>`).join('');
-      results.classList.add('active');
-      results.scrollIntoView({ behavior: 'smooth' });
-    }
-  </script>
-</body>
-</html>
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1118"><meta name="description" content="OsintLost — privacy-first image metadata and digital footprint audit."><title>OsintLost — Privacy Intelligence Lab</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b1118;--panel:#111b25;--panel2:#162330;--line:#263746;--text:#e9f1f5;--muted:#91a5b4;--cyan:#4de0d0;--gold:#e6b86a;--red:#ff6e75;--green:#78d9a1}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 12% -10%,#16424a55,transparent 40%),var(--bg);color:var(--text);font:15px Manrope,system-ui;line-height:1.55}.shell{max-width:1180px;margin:auto;padding:25px 20px 60px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:42px}.brand{display:flex;align-items:center;gap:12px}.mark{width:46px;height:46px;border-radius:14px;background:linear-gradient(140deg,var(--cyan),#1e8991);display:grid;place-items:center;color:#071519;font-size:23px;font-weight:900}.brand h1{margin:0;font-size:21px;letter-spacing:.12em}.brand small{color:var(--muted);font:10px 'DM Mono';letter-spacing:.12em}.status{color:var(--green);border:1px solid #78d9a155;border-radius:25px;padding:7px 11px;font:11px 'DM Mono'}.hero{display:grid;grid-template-columns:1.3fr .7fr;gap:24px;align-items:end;margin-bottom:30px}.eyebrow{color:var(--gold);font:11px 'DM Mono';letter-spacing:.16em;text-transform:uppercase}.hero h2{font-size:clamp(34px,5vw,56px);line-height:1.05;letter-spacing:-.05em;margin:12px 0}.hero h2 em{color:var(--cyan);font-style:normal}.hero p,.sub{color:var(--muted)}.hero-note,.card{background:linear-gradient(150deg,var(--panel),#0f1821);border:1px solid var(--line);border-radius:16px;padding:22px}.hero-note{background:#14272e;border-color:#31515a;color:#bfd1d6;font-size:13px}.hero-note b{display:block;color:var(--cyan);margin-bottom:5px}.tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:20px}.tab,.smallbtn{background:var(--panel);border:1px solid var(--line);border-radius:9px;color:var(--muted);padding:10px 13px;cursor:pointer;font-weight:700}.tab.active{background:#17383c;border-color:#347c7c;color:var(--cyan)}.panel{display:none}.panel.active{display:block}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{margin-bottom:16px}.card h3{margin:0 0 5px;font-size:17px}.sub{font-size:13px;margin:0 0 16px}.drop{display:block;border:1.5px dashed #45616e;border-radius:13px;background:#101d27;padding:30px 15px;text-align:center;cursor:pointer}.drop:hover,.drop.drag{border-color:var(--cyan);background:#153037}.drop input{display:none}.drop strong{display:block;margin:8px}.drop small{color:var(--muted)}.check{display:flex;gap:9px;color:#b7c8d0;font-size:12px;margin:14px 0}.check input{accent-color:var(--cyan)}.btn{border:0;border-radius:9px;padding:11px 16px;background:linear-gradient(135deg,var(--cyan),#78c9b9);color:#082022;font-weight:800;cursor:pointer}.btn:disabled{opacity:.4;cursor:not-allowed}.btn.alt{background:var(--panel2);border:1px solid var(--line);color:var(--text)}.row{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.field{width:100%;padding:12px;background:#0b141c;border:1px solid var(--line);border-radius:9px;color:var(--text)}label.fieldlabel{display:block;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;margin:13px 0 6px}.result{display:none}.result.show{display:block}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:15px 0}.stat,.meta-item,.link,.evidence{background:#0d1821;border:1px solid var(--line);border-radius:10px;padding:12px}.stat b{display:block;color:var(--cyan);font:17px 'DM Mono';overflow-wrap:anywhere}.stat small,.meta-item small{color:var(--muted);font-size:10px;text-transform:uppercase}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px}.meta-item span{display:block;font:12px 'DM Mono';overflow-wrap:anywhere}.alert{padding:12px;border:1px solid #a7793b66;background:#3b2c1733;color:#e8c58f;border-radius:10px;font-size:12px;margin:10px 0}.alert.good{border-color:#4b9d7566;background:#17372b55;color:#a9e4c1}.links{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}.link{display:block;color:var(--text);font-size:12px}.link:hover{border-color:var(--cyan);text-decoration:none}.evidence-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}.evidence{display:flex;justify-content:space-between;gap:10px;font-size:12px}.evidence small{display:block;color:var(--muted)}.footer{border-top:1px solid var(--line);margin-top:35px;padding-top:18px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;flex-wrap:wrap}.toast{position:fixed;bottom:18px;right:18px;padding:12px 16px;background:#17383c;border:1px solid #347c7c;border-radius:9px;display:none}.toast.show{display:block}@media(max-width:760px){.hero,.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}.shell{padding:17px 13px}.hero h2{font-size:39px}}@media(max-width:480px){.meta,.links{grid-template-columns:1fr}.brand h1{font-size:18px}}
+</style></head><body><main class="shell">
+<header class="top"><div class="brand"><div class="mark">L</div><div><h1>OSINTLOST</h1><small>PRIVACY INTELLIGENCE LAB</small></div></div><span class="status" id="api">● CHECKING API</span></header>
+<section class="hero"><div><div class="eyebrow">IMAGE FORENSICS · DIGITAL FOOTPRINT · PRIVACY</div><h2>Know what your<br><em>images reveal.</em></h2><p>Лаборатория цифровой приватности: проверяйте собственные изображения, находите потенциальные утечки метаданных, очищайте файлы перед публикацией и систематизируйте публичные источники.</p></div><aside class="hero-note"><b>PRIVACY BY DESIGN</b>Файлы обрабатываются в памяти и не сохраняются в постоянном хранилище. GPS-координаты не раскрываются. Используйте только свои материалы или контент, на который у вас есть разрешение.</aside></section>
+<nav class="tabs"><button class="tab active" data-tab="image">01 · Image Lab</button><button class="tab" data-tab="footprint">02 · My Footprint</button><button class="tab" data-tab="vault">03 · Evidence Vault</button><button class="tab" data-tab="guide">04 · Guide</button></nav>
+<section class="panel active" id="image"><div class="grid"><article class="card"><h3>Image privacy scan</h3><p class="sub">EXIF, file fingerprints и удаление метаданных.</p><label class="drop" id="drop"><div style="font-size:28px;color:var(--cyan)">↥</div><strong id="filename">Перетащите изображение или нажмите для выбора</strong><small>JPG · PNG · WEBP · TIFF · до 15 MB</small><input id="file" type="file" accept="image/jpeg,image/png,image/webp,image/tiff"></label><label class="check"><input id="consent" type="checkbox"><span>Это моё изображение или у меня есть разрешение на анализ.</span></label><div class="row"><button class="btn" id="scan" disabled>Проверить изображение</button><button class="btn alt" id="reset">Сброс</button></div><p class="sub" id="scanStatus" aria-live="polite"></p></article>
+<article class="card"><h3>Инструменты анализа</h3><p class="sub">Без распознавания лиц и идентификации людей.</p><div class="evidence-list"><div class="evidence"><div><b>EXIF metadata</b><small>Камера, дата, ПО, наличие GPS</small><span>01</span></div></div><div class="evidence"><div><b>File fingerprint</b><small>SHA-256 и perceptual dHash</small></div><span>02</span></div><div class="evidence"><div><b>Metadata removal</b><small>Скачать копию без EXIF</small></div><span>03</span></div><div class="evidence"><div><b>Privacy warnings</b><small>Что файл может раскрывать</small></div><span>04</span></div></div></article></div>
+<div class="result" id="result"><article class="card"><div class="eyebrow">SCAN COMPLETE</div><h3>Результат проверки</h3><div class="stats" id="stats"></div><div id="warnings"></div><h3 style="margin:20px 0 10px">Метаданные</h3><div class="meta" id="metadata"></div><div class="row"><a class="btn" id="clean" href="#" download="osintlost-clean-image">Скачать очищенную копию</a><button class="btn alt" id="saveScan">В Evidence Vault</button><button class="btn alt" id="report">Экспорт JSON</button></div><p class="sub">Ссылка на очищенную копию действует 15 минут. Оригинал не сохраняется на сервере.</p></article></div></section>
+<section class="panel" id="footprint"><div class="grid"><article class="card"><h3>Audit my public username</h3><p class="sub">Поисковые ссылки для ручной проверки собственного ника. Без scraping и автоматического сбора профилей.</p><label class="fieldlabel" for="username">Ваш username</label><input class="field" id="username" maxlength="80" placeholder="@your_handle"><div class="row"><button class="btn" id="search">Создать ссылки</button></div><div class="links" id="userLinks"></div></article><article class="card"><h3>Reverse image research</h3><p class="sub">Ручной поиск визуальных копий собственных изображений.</p><div class="links" id="reverse"></div><div class="alert">Внешние сервисы могут обрабатывать отправленные изображения по своим правилам. Проверьте их политику приватности перед загрузкой.</div></article></div></section>
+<section class="panel" id="vault"><article class="card"><h3>Evidence Vault</h3><p class="sub">Локальный журнал в браузере этого устройства. Экспортируйте записи в JSON.</p><label class="fieldlabel">Название</label><input class="field" id="evTitle" maxlength="100" placeholder="Проверка собственного фото"><label class="fieldlabel">Публичный URL источника</label><input class="field" id="evUrl" maxlength="500" placeholder="https://…"><label class="fieldlabel">Заметка</label><input class="field" id="evNote" maxlength="500" placeholder="Наблюдение / результат"><div class="row"><button class="btn" id="add">Сохранить</button><button class="btn alt" id="export">Экспорт журнала</button><button class="btn alt" id="clearVault">Очистить</button></div><div class="evidence-list" id="records"></div></article></section>
+<section class="panel" id="guide"><div class="grid"><article class="card"><h3>Безопасная проверка изображения</h3><div class="evidence-list"><div class="evidence"><div><b>1. Сохраните оригинал</b><small>Работайте с копией.</small></div></div><div class="evidence"><div><b>2. Проверьте метаданные</b><small>Дата и модель камеры могут раскрывать контекст.</small></div></div><div class="evidence"><div><b>3. Удалите EXIF</b><small>Скачайте очищенную копию перед публикацией.</small></div></div><div class="evidence"><div><b>4. Фиксируйте источники</b><small>Сохраняйте URL, время и описание.</small></div></div></div></article><article class="card"><h3>Допустимое использование</h3><div class="alert good">Аудит собственных аккаунтов, проверка своих изображений, EXIF, файловые отпечатки и публичные URL.</div><div class="alert">Нет распознавания незнакомых людей, поиска личности по лицу, деанонимизации, поиска адресов/телефонов или сбора частных данных.</div><p class="sub">Совпадение ника или изображения не доказывает принадлежность аккаунта конкретному человеку.</p></article></div></section>
+<footer class="footer"><span>OSINTLOST · PRIVACY INTELLIGENCE LAB · v1.0</span><a href="https://github.com/Alexberik/OsintLost" target="_blank" rel="noopener">GitHub repository ↗</a></footer></main><div class="toast" id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);let file=null,last=null;function toast(t){$('toast').textContent=t;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2500)}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===b.dataset.tab))});
+fetch('/api/health').then(r=>r.json()).then(x=>$('api').textContent='● API ONLINE · '+x.version).catch(()=>$('api').textContent='● API OFFLINE');
+function setFile(f){if(!f)return;if(!['image/jpeg','image/png','image/webp','image/tiff'].includes(f.type)||f.size>15*1024*1024){toast('Формат не поддерживается или файл больше 15 MB');return}file=f;$('filename').textContent=f.name;$('scan').disabled=!$('consent').checked}
+$('drop').onclick=e=>{if(e.target.tagName!=='INPUT')$('file').click()};$('file').onchange=e=>setFile(e.target.files[0]);['dragenter','dragover'].forEach(n=>$('drop').addEventListener(n,e=>{e.preventDefault();$('drop').classList.add('drag')}));['dragleave','drop'].forEach(n=>$('drop').addEventListener(n,e=>{e.preventDefault();$('drop').classList.remove('drag')}));$('drop').ondrop=e=>{if(e.dataTransfer.files[0])setFile(e.dataTransfer.files[0])};$('consent').onchange=()=>$('scan').disabled=!file||!$('consent').checked;
+$('reset').onclick=()=>{file=null;last=null;$('file').value='';$('filename').textContent='Перетащите изображение или нажмите для выбора';$('scan').disabled=true;$('result').classList.remove('show');$('scanStatus').textContent=''};
+$('scan').onclick=async()=>{if(!file||!$('consent').checked)return;$('scan').disabled=true;$('scanStatus').textContent='Анализ…';let fd=new FormData();fd.append('file',file);fd.append('consent','self_or_authorized');try{let r=await fetch('/api/analyze',{method:'POST',body:fd}),d=await r.json();if(!r.ok)throw Error(d.detail||'Ошибка');last=d;render(d);$('scanStatus').textContent='Готово'}catch(e){$('scanStatus').textContent=e.message}finally{$('scan').disabled=false}};
+function render(d){$('stats').innerHTML='';[['Size',(d.size_bytes/1024).toFixed(1)+' KB'],['Dimensions',d.width+' × '+d.height],['Format',d.format],['GPS',d.gps_present?'PRESENT':'NOT FOUND']].forEach(([k,v])=>{let x=document.createElement('div');x.className='stat';let b=document.createElement('b');b.textContent=v;let s=document.createElement('small');s.textContent=k;x.append(b,s);$('stats').append(x)});$('warnings').innerHTML='';d.warnings.forEach(t=>{let x=document.createElement('div');x.className='alert';x.textContent=t;$('warnings').append(x)});$('metadata').innerHTML='';let entries=Object.entries(d.metadata);if(!entries.length)$('metadata').textContent='Выбранные EXIF-поля не обнаружены.';entries.forEach(([k,v])=>{let x=document.createElement('div');x.className='meta-item';let s=document.createElement('small');s.textContent=k;let t=document.createElement('span');t.textContent=v;x.append(s,t);$('metadata').append(x)});$('clean').href=d.clean_url;$('result').classList.add('show')}
+function download(name,body,type){let a=document.createElement('a'),u=URL.createObjectURL(new Blob([body],{type}));a.href=u;a.download=name;a.click();URL.revokeObjectURL(u)}
+$('report').onclick=()=>last&&download('osintlost-report.json',JSON.stringify(last,null,2),'application/json');$('saveScan').onclick=()=>{if(last){addRecord({title:'Image scan · '+last.filename,url:'',note:'SHA-256 '+last.sha256+'; GPS metadata '+(last.gps_present?'present':'not found')});toast('Сохранено локально')}};
+$('search').onclick=async()=>{let u=$('username').value.trim();if(!u)return toast('Введите свой username');let r=await fetch('/api/self-search?username='+encodeURIComponent(u)),d=await r.json();if(!r.ok)return toast(d.detail||'Ошибка');$('userLinks').innerHTML='';Object.entries(d.links).forEach(([n,url])=>{let a=document.createElement('a');a.className='link';a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='↗ '+n;$('userLinks').append(a)})};
+fetch('/api/reverse-search').then(r=>r.json()).then(d=>Object.entries(d.links).forEach(([n,url])=>{let a=document.createElement('a');a.className='link';a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='↗ '+n;$('reverse').append(a)}));
+function getRecords(){try{return JSON.parse(localStorage.getItem('osintlost_vault')||'[]')}catch{return []}}function addRecord(v){let a=getRecords();a.unshift({...v,id:crypto.randomUUID(),created:new Date().toISOString()});localStorage.setItem('osintlost_vault',JSON.stringify(a));renderRecords()}
+function renderRecords(){let el=$('records');el.innerHTML='';getRecords().forEach(v=>{let x=document.createElement('div');x.className='evidence';let d=document.createElement('div'),b=document.createElement('b'),s=document.createElement('small');b.textContent=v.title;s.textContent=new Date(v.created).toLocaleString()+' · '+(v.note||'');d.append(b,s);if(v.url){let a=document.createElement('a');a.href=v.url;a.target='_blank';a.rel='noopener';a.textContent='Source ↗';d.append(a)}let del=document.createElement('button');del.className='smallbtn';del.textContent='×';del.onclick=()=>{localStorage.setItem('osintlost_vault',JSON.stringify(getRecords().filter(z=>z.id!==v.id)));renderRecords()};x.append(d,del);el.append(x)});if(!el.children.length)el.textContent='Журнал пока пуст.'}
+$('add').onclick=()=>{let title=$('evTitle').value.trim(),url=$('evUrl').value.trim();if(!title)return toast('Укажите название');if(url){try{let u=new URL(url);if(!['http:','https:'].includes(u.protocol))throw Error();url=u.href}catch{return toast('Некорректный URL')}}addRecord({title,url,note:$('evNote').value.trim()});$('evTitle').value='';$('evUrl').value='';$('evNote').value='';toast('Запись добавлена')};
+$('export').onclick=()=>download('osintlost-evidence.json',JSON.stringify(getRecords(),null,2),'application/json');$('clearVault').onclick=()=>{if(confirm('Удалить все локальные записи?')){localStorage.removeItem('osintlost_vault');renderRecords()}};renderRecords();
+</script></body></html>
