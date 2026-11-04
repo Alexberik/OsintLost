@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, io, os, time, uuid
+import hashlib, io, os, time, uuid, warnings
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,13 +12,28 @@ from PIL import Image, ExifTags, ImageOps, UnidentifiedImageError
 ROOT=Path(__file__).resolve().parent.parent
 FRONTEND=ROOT/"frontend"
 MAX_BYTES=int(os.getenv("LOST_MAX_UPLOAD_MB","15"))*1024*1024
+MAX_PIXELS=int(os.getenv("LOST_MAX_IMAGE_PIXELS","40000000"))
+Image.MAX_IMAGE_PIXELS=MAX_PIXELS
+warnings.simplefilter("error", Image.DecompressionBombWarning)
 buckets:dict[str,deque[float]]=defaultdict(deque)
 clean_images:dict[str,tuple[bytes,str,float]]={}
-app=FastAPI(title="OsintLost",version="1.0.0",docs_url="/api/docs")
+app=FastAPI(title="OsintLost",version="1.1.0",docs_url="/api/docs")
 app.mount("/static",StaticFiles(directory=str(FRONTEND)),name="static")
 
+@app.middleware("http")
+async def security_headers(request:Request, call_next):
+    response=await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options","nosniff")
+    response.headers.setdefault("X-Frame-Options","DENY")
+    response.headers.setdefault("Referrer-Policy","strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy","camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Content-Security-Policy","default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    response.headers.setdefault("Strict-Transport-Security","max-age=31536000; includeSubDomains")
+    return response
+
 def rate_check(request:Request):
-    ip=request.client.host if request.client else "unknown"; now=time.monotonic(); q=buckets[ip]
+    ip=request.client.host if request.client else "unknown"
+    now=time.monotonic(); q=buckets[ip]
     while q and now-q[0]>60:q.popleft()
     if len(q)>=20:raise HTTPException(429,"Too many requests. Wait one minute.")
     q.append(now)
@@ -42,10 +57,24 @@ def metadata(image):
     return out
 
 @app.get("/",response_class=HTMLResponse)
-async def home():return (FRONTEND/"index.html").read_text(encoding="utf-8")
+async def home():
+    return (FRONTEND/"index.html").read_text(encoding="utf-8")
+
+@app.get("/privacy",response_class=HTMLResponse)
+async def privacy():
+    return (FRONTEND/"privacy.html").read_text(encoding="utf-8")
+
+@app.get("/terms",response_class=HTMLResponse)
+async def terms():
+    return (FRONTEND/"terms.html").read_text(encoding="utf-8")
+
+@app.get("/robots.txt")
+async def robots():
+    return Response("User-agent: *\\nAllow: /\\nDisallow: /api/\\n",media_type="text/plain")
 
 @app.get("/api/health")
-async def health():return {"status":"ok","app":"OsintLost","version":app.version,"storage":"ephemeral"}
+async def health():
+    return {"status":"ok","app":"OsintLost","version":app.version,"storage":"ephemeral"}
 
 @app.post("/api/analyze")
 async def analyze(request:Request,file:UploadFile=File(...),consent:str=Form(...)):
@@ -55,32 +84,38 @@ async def analyze(request:Request,file:UploadFile=File(...),consent:str=Form(...
     if not raw:raise HTTPException(400,"Empty upload.")
     if len(raw)>MAX_BYTES:raise HTTPException(413,f"Image exceeds {MAX_BYTES//1048576} MB.")
     try:
-        im=Image.open(io.BytesIO(raw)); im.verify(); im=Image.open(io.BytesIO(raw)); fmt=(im.format or "").upper(); im=ImageOps.exif_transpose(im)
-        w,h=im.size
+        im=Image.open(io.BytesIO(raw)); im.verify()
+        im=Image.open(io.BytesIO(raw)); fmt=(im.format or "").upper()
         if fmt not in {"JPEG","JPG","PNG","WEBP","TIFF"}:raise HTTPException(415,"Supported: JPEG, PNG, WEBP, TIFF.")
-        meta=metadata(im); fingerprint=dhash(im); digest=hashlib.sha256(raw).hexdigest()
+        w,h=im.size
+        if w<=0 or h<=0 or w*h>MAX_PIXELS:raise HTTPException(413,"Image dimensions exceed the processing limit.")
+        meta=metadata(im); im=ImageOps.exif_transpose(im)
+        fingerprint=dhash(im); digest=hashlib.sha256(raw).hexdigest()
         clean=im.convert("RGB"); out=io.BytesIO()
         if fmt in {"JPEG","JPG"}:clean.save(out,format="JPEG",quality=92,optimize=True); mime="image/jpeg"
         elif fmt=="WEBP":clean.save(out,format="WEBP",quality=92); mime="image/webp"
         else:clean.save(out,format="PNG",optimize=True); mime="image/png"
     except HTTPException:raise
-    except (UnidentifiedImageError,OSError,ValueError):raise HTTPException(415,"Invalid or unsupported image.")
+    except (UnidentifiedImageError,OSError,ValueError,Image.DecompressionBombError,Image.DecompressionBombWarning):raise HTTPException(415,"Invalid, unsafe or unsupported image.")
     except Exception:raise HTTPException(400,"Could not process image.")
-    token=uuid.uuid4().hex; now=time.time(); clean_images[token]=(out.getvalue(),mime,now+900)
+    token=uuid.uuid4().hex; now=time.time()
+    clean_images[token]=(out.getvalue(),mime,now+900)
     for k,v in list(clean_images.items()):
         if v[2]<now:clean_images.pop(k,None)
-    gps="GPS data" in meta; warnings=[]
-    if gps:warnings.append("GPS metadata exists. Exact coordinates are intentionally hidden.")
-    if any(k in meta for k in ("DateTime","DateTimeOriginal","DateTimeDigitized")):warnings.append("Capture date/time is embedded.")
-    if any(k in meta for k in ("Make","Model")):warnings.append("Camera make/model is embedded.")
-    if not meta:warnings.append("No selected EXIF fields found; other metadata formats may still exist.")
-    warnings.append("A metadata-stripped copy is ready to download.")
-    return {"id":token,"analyzed_at":datetime.now(timezone.utc).isoformat(),"filename":Path(file.filename or "image").name[:120],"size_bytes":len(raw),"sha256":digest,"dhash":fingerprint,"width":w,"height":h,"format":fmt,"metadata":meta,"gps_present":gps,"warnings":warnings,"clean_url":f"/api/clean/{token}","clean_expires_seconds":900,"storage":"not_persisted"}
+    gps="GPS data" in meta; warnings_out=[]
+    if gps:warnings_out.append("GPS metadata exists. Exact coordinates are intentionally hidden.")
+    if any(k in meta for k in ("DateTime","DateTimeOriginal","DateTimeDigitized")):warnings_out.append("Capture date/time is embedded.")
+    if any(k in meta for k in ("Make","Model")):warnings_out.append("Camera make/model is embedded.")
+    if not meta:warnings_out.append("No selected EXIF fields found; other metadata formats may still exist.")
+    warnings_out.append("A metadata-stripped copy is ready to download.")
+    return {"id":token,"analyzed_at":datetime.now(timezone.utc).isoformat(),"filename":Path(file.filename or "image").name[:120],"size_bytes":len(raw),"sha256":digest,"dhash":fingerprint,"width":w,"height":h,"format":fmt,"metadata":meta,"gps_present":gps,"warnings":warnings_out,"clean_url":f"/api/clean/{token}","clean_expires_seconds":900,"storage":"not_persisted"}
 
 @app.get("/api/clean/{token}")
 async def clean_download(token:str):
     item=clean_images.get(token)
-    if not item or item[2]<time.time():clean_images.pop(token,None);raise HTTPException(404,"Clean copy expired. Analyze again.")
+    if not item or item[2]<time.time():
+        clean_images.pop(token,None)
+        raise HTTPException(404,"Clean copy expired. Analyze again.")
     data,mime,_=item
     return Response(data,media_type=mime,headers={"Content-Disposition":'attachment; filename="osintlost-clean-image"',"Cache-Control":"no-store"})
 
