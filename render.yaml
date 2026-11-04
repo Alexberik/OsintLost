@@ -9,3 +9,5 @@ services:
         value: 8090
       - key: LOST_MAX_UPLOAD_MB
         value: 15
+      - key: LOST_MAX_IMAGE_PIXELS
+        value: 40000000
