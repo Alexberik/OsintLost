@@ -1,30 +1,16 @@
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-venv/
+.pytest_cache/
 .venv/
-env/
-ENV/
-
-# Runtime data
-uploads/
-reports/
-*.log
-
-# Models (download via scripts/download_model.sh)
-models/*.onnx
-!models/.gitkeep
-
-# IDE / OS
+venv/
+.env
+.env.*
+!.env.example
 .DS_Store
 .idea/
 .vscode/
 *.swp
-.env
-.local/
-
-# Node (if any)
-node_modules/
+*.log
+uploads/
+reports/
+models/*.onnx
