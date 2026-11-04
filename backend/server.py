@@ -1,213 +1,96 @@
-#!/usr/bin/env python3
-"""
-OsintLost - OSINT People Search by Photo
-v0.2 - local face detection (UltraFace) + social profile discovery
-"""
-
-import os
-import json
-import uuid
-import cgi
-import mimetypes
+from __future__ import annotations
+import hashlib, io, os, time, uuid
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, quote
+from urllib.parse import quote
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
+from PIL import Image, ExifTags, ImageOps, UnidentifiedImageError
 
-from face_detector import get_detector
-from osint_core import (
-    BASE_DIR, UPLOAD_DIR, REPORTS_DIR, FRONTEND_DIR, HAS_PIL,
-    utcnow, get_file_hash, extract_exif,
-    reverse_links, generate_username_candidates,
-    social_profile_links, username_tool_links,
-)
+ROOT=Path(__file__).resolve().parent.parent
+FRONTEND=ROOT/"frontend"
+MAX_BYTES=int(os.getenv("LOST_MAX_UPLOAD_MB","15"))*1024*1024
+buckets:dict[str,deque[float]]=defaultdict(deque)
+clean_images:dict[str,tuple[bytes,str,float]]={}
+app=FastAPI(title="OsintLost",version="1.0.0",docs_url="/api/docs")
+app.mount("/static",StaticFiles(directory=str(FRONTEND)),name="static")
 
-class LostHandler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {args[0] if args else fmt}")
+def rate_check(request:Request):
+    ip=request.client.host if request.client else "unknown"; now=time.monotonic(); q=buckets[ip]
+    while q and now-q[0]>60:q.popleft()
+    if len(q)>=20:raise HTTPException(429,"Too many requests. Wait one minute.")
+    q.append(now)
 
-    def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+def dhash(image):
+    px=list(image.convert("L").resize((9,8)).tobytes()); bits=[]
+    for y in range(8):
+        row=px[y*9:y*9+9]; bits.extend(1 if row[x]>row[x+1] else 0 for x in range(8))
+    n=0
+    for bit in bits:n=(n<<1)|bit
+    return f"{n:016x}"
 
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self._cors()
-        self.end_headers()
-
-    def do_GET(self):
-        path = urlparse(self.path).path
-
-        if path in ("/", "/index.html"):
-            self._serve_file(FRONTEND_DIR / "index.html", "text/html; charset=utf-8")
-            return
-
-        if path.startswith("/uploads/"):
-            name = path[len("/uploads/"):]
-            fpath = UPLOAD_DIR / name
-            if fpath.exists() and fpath.is_file():
-                ctype = mimetypes.guess_type(str(fpath))[0] or "application/octet-stream"
-                self._serve_file(fpath, ctype)
-            else:
-                self.send_error(404)
-            return
-
-        if path.startswith("/api/report/"):
-            job_id = path.rstrip("/").split("/")[-1]
-            rpath = REPORTS_DIR / f"{job_id}.json"
-            if rpath.exists():
-                self._json(json.loads(rpath.read_text(encoding="utf-8")))
-            else:
-                self.send_error(404)
-            return
-
-        if path == "/api/health":
-            det = get_detector()
-            self._json({
-                "status": "ok",
-                "name": "Lost",
-                "version": "0.2.0",
-                "pillow": HAS_PIL,
-                "face_detector": det.available,
-                "time": utcnow(),
-            })
-            return
-
-        self.send_error(404)
-
-    def do_POST(self):
-        if self.path != "/api/analyze":
-            self.send_error(404)
-            return
-
-        content_type = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in content_type:
-            self._json({"error": "Expected multipart/form-data"}, 400)
-            return
-
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type},
-        )
-
-        if "file" not in form or not form["file"].file:
-            self._json({"error": "No file"}, 400)
-            return
-
-        fileitem = form["file"]
-        data = fileitem.file.read()
-        if len(data) > 15 * 1024 * 1024:
-            self._json({"error": "File too large (max 15 MB)"}, 400)
-            return
-
-        name = (form.getvalue("name") or "").strip()
-        username = (form.getvalue("username") or "").strip()
-        extra = (form.getvalue("extra") or "").strip()
-
-        job_id = str(uuid.uuid4())[:8]
-        orig = fileitem.filename or "photo.jpg"
-        ext = Path(orig).suffix.lower() or ".jpg"
-        filename = f"{job_id}{ext}"
-        save_path = UPLOAD_DIR / filename
-        save_path.write_bytes(data)
-
-        file_hash = get_file_hash(data)
-        exif = extract_exif(save_path)
-        gps = exif.get("gps")
-
-        detector = get_detector()
-        face_result = detector.detect(save_path)
-
-        handles = generate_username_candidates(name, username)
-        profile_links = social_profile_links(handles)
-        tool_links = username_tool_links(handles)
-
-        notes = []
-        if face_result.get("count", 0) > 0:
-            notes.append(f"Found faces: {face_result['count']} (local UltraFace)")
-            for i, f in enumerate(face_result["faces"][:5], 1):
-                notes.append(f"  Face #{i}: score={f['score']}, size={f['width']}x{f['height']}px")
-        else:
-            notes.append("No faces detected locally - still upload photo to Yandex / PimEyes")
-
-        if gps:
-            notes.append(f"GPS: {gps['lat']}, {gps['lon']}")
-            notes.append(f"Map: https://www.google.com/maps?q={gps['lat']},{gps['lon']}")
-        else:
-            notes.append("No GPS in EXIF")
-
-        if handles:
-            notes.append(f"Username candidates generated: {len(handles)}")
-            notes.append("Check profiles manually + run Sherlock/Maigret")
-
-        notes.append("Required: Yandex Images -> PimEyes -> FaceCheck.ID -> Search4Faces")
-
-        result = {
-            "job_id": job_id,
-            "filename": filename,
-            "original_name": orig,
-            "uploaded_at": utcnow(),
-            "file_hash": file_hash,
-            "size_bytes": len(data),
-            "exif": {k: v for k, v in exif.items() if k != "raw"},
-            "exif_raw": exif.get("raw", {}),
-            "gps": gps,
-            "faces": face_result,
-            "face_detected": face_result.get("count", 0) > 0,
-            "reverse_links": reverse_links(),
-            "username_candidates": handles,
-            "social_links": profile_links,
-            "username_tools": tool_links,
-            "name": name,
-            "username": username,
-            "extra": extra,
-            "notes": notes,
-            "image_url": f"/uploads/{filename}",
-            "annotated_url": f"/uploads/{face_result['annotated_path']}" if face_result.get("annotated_path") else None,
-        }
-
-        (REPORTS_DIR / f"{job_id}.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        self._json(result)
-
-    def _json(self, obj, code=200):
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self._cors()
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _serve_file(self, path: Path, content_type: str):
-        if not path.exists():
-            self.send_error(404)
-            return
-        data = path.read_bytes()
-        self.send_response(200)
-        self._cors()
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-
-def main():
-    port = int(os.environ.get("PORT", 8090))
-    det = get_detector()
-    print(f"Lost v0.2  ->  http://0.0.0.0:{port}")
-    print(f"  Pillow EXIF : {HAS_PIL}")
-    print(f"  Face detect : {det.available}")
-    server = HTTPServer(("0.0.0.0", port), LostHandler)
+def metadata(image):
+    out={}
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopped")
-        server.server_close()
+        for key,value in image.getexif().items():
+            name=ExifTags.TAGS.get(key,str(key))
+            if name=="GPSInfo":out["GPS data"]="Present — exact coordinates hidden"
+            elif name in {"Make","Model","DateTime","DateTimeOriginal","DateTimeDigitized","Software","Orientation","ImageDescription","Artist","Copyright"}:out[name]=str(value)[:160]
+    except Exception:pass
+    return out
 
+@app.get("/",response_class=HTMLResponse)
+async def home():return (FRONTEND/"index.html").read_text(encoding="utf-8")
 
-if __name__ == "__main__":
-    main()
+@app.get("/api/health")
+async def health():return {"status":"ok","app":"OsintLost","version":app.version,"storage":"ephemeral"}
+
+@app.post("/api/analyze")
+async def analyze(request:Request,file:UploadFile=File(...),consent:str=Form(...)):
+    rate_check(request)
+    if consent!="self_or_authorized":raise HTTPException(400,"Confirm you own this image or are authorized to analyze it.")
+    raw=await file.read(MAX_BYTES+1)
+    if not raw:raise HTTPException(400,"Empty upload.")
+    if len(raw)>MAX_BYTES:raise HTTPException(413,f"Image exceeds {MAX_BYTES//1048576} MB.")
+    try:
+        im=Image.open(io.BytesIO(raw)); im.verify(); im=Image.open(io.BytesIO(raw)); fmt=(im.format or "").upper(); im=ImageOps.exif_transpose(im)
+        w,h=im.size
+        if fmt not in {"JPEG","JPG","PNG","WEBP","TIFF"}:raise HTTPException(415,"Supported: JPEG, PNG, WEBP, TIFF.")
+        meta=metadata(im); fingerprint=dhash(im); digest=hashlib.sha256(raw).hexdigest()
+        clean=im.convert("RGB"); out=io.BytesIO()
+        if fmt in {"JPEG","JPG"}:clean.save(out,format="JPEG",quality=92,optimize=True); mime="image/jpeg"
+        elif fmt=="WEBP":clean.save(out,format="WEBP",quality=92); mime="image/webp"
+        else:clean.save(out,format="PNG",optimize=True); mime="image/png"
+    except HTTPException:raise
+    except (UnidentifiedImageError,OSError,ValueError):raise HTTPException(415,"Invalid or unsupported image.")
+    except Exception:raise HTTPException(400,"Could not process image.")
+    token=uuid.uuid4().hex; now=time.time(); clean_images[token]=(out.getvalue(),mime,now+900)
+    for k,v in list(clean_images.items()):
+        if v[2]<now:clean_images.pop(k,None)
+    gps="GPS data" in meta; warnings=[]
+    if gps:warnings.append("GPS metadata exists. Exact coordinates are intentionally hidden.")
+    if any(k in meta for k in ("DateTime","DateTimeOriginal","DateTimeDigitized")):warnings.append("Capture date/time is embedded.")
+    if any(k in meta for k in ("Make","Model")):warnings.append("Camera make/model is embedded.")
+    if not meta:warnings.append("No selected EXIF fields found; other metadata formats may still exist.")
+    warnings.append("A metadata-stripped copy is ready to download.")
+    return {"id":token,"analyzed_at":datetime.now(timezone.utc).isoformat(),"filename":Path(file.filename or "image").name[:120],"size_bytes":len(raw),"sha256":digest,"dhash":fingerprint,"width":w,"height":h,"format":fmt,"metadata":meta,"gps_present":gps,"warnings":warnings,"clean_url":f"/api/clean/{token}","clean_expires_seconds":900,"storage":"not_persisted"}
+
+@app.get("/api/clean/{token}")
+async def clean_download(token:str):
+    item=clean_images.get(token)
+    if not item or item[2]<time.time():clean_images.pop(token,None);raise HTTPException(404,"Clean copy expired. Analyze again.")
+    data,mime,_=item
+    return Response(data,media_type=mime,headers={"Content-Disposition":'attachment; filename="osintlost-clean-image"',"Cache-Control":"no-store"})
+
+@app.get("/api/self-search")
+async def self_search(username:str):
+    value=username.strip().lstrip("@")
+    if not value or len(value)>80 or any(ord(c)<32 for c in value):raise HTTPException(400,"Enter a valid username.")
+    q=quote('"'+value+'"')
+    return {"query":value,"links":{"Google exact search":f"https://www.google.com/search?q={q}","Bing exact search":f"https://www.bing.com/search?q={q}","GitHub":f"https://github.com/search?q={quote(value)}&type=users","Reddit":f"https://www.reddit.com/search/?q={quote(value)}","YouTube":f"https://www.youtube.com/results?search_query={quote(value)}","TikTok search":f"https://www.tiktok.com/search?q={quote(value)}"},"note":"Manual public search only; no scraping or identity matching."}
+
+@app.get("/api/reverse-search")
+async def reverse_search():
+    return {"links":{"Google Lens":"https://lens.google.com/","Bing Visual Search":"https://www.bing.com/visualsearch","TinEye":"https://tineye.com/","Yandex Images":"https://yandex.com/images/"}}
