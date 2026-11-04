@@ -55,8 +55,8 @@ async def analyze(request:Request,file:UploadFile=File(...),consent:str=Form(...
     if not raw:raise HTTPException(400,"Empty upload.")
     if len(raw)>MAX_BYTES:raise HTTPException(413,f"Image exceeds {MAX_BYTES//1048576} MB.")
     try:
-        im=Image.open(io.BytesIO(raw)); im.verify(); im=Image.open(io.BytesIO(raw)); im=ImageOps.exif_transpose(im)
-        w,h=im.size; fmt=(im.format or "").upper()
+        im=Image.open(io.BytesIO(raw)); im.verify(); im=Image.open(io.BytesIO(raw)); fmt=(im.format or "").upper(); im=ImageOps.exif_transpose(im)
+        w,h=im.size
         if fmt not in {"JPEG","JPG","PNG","WEBP","TIFF"}:raise HTTPException(415,"Supported: JPEG, PNG, WEBP, TIFF.")
         meta=metadata(im); fingerprint=dhash(im); digest=hashlib.sha256(raw).hexdigest()
         clean=im.convert("RGB"); out=io.BytesIO()
