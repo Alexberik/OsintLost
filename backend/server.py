@@ -24,7 +24,7 @@ def rate_check(request:Request):
     q.append(now)
 
 def dhash(image):
-    px=list(image.convert("L").resize((9,8)).getdata()); bits=[]
+    px=list(image.convert("L").resize((9,8)).tobytes()); bits=[]
     for y in range(8):
         row=px[y*9:y*9+9]; bits.extend(1 if row[x]>row[x+1] else 0 for x in range(8))
     n=0
